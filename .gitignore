@@ -1,0 +1,16 @@
+# Python
+server/venv/
+__pycache__/
+*.pyc
+.env
+
+# Flutter
+ocr_app/build/
+ocr_app/.dart_tool/
+ocr_app/.flutter-plugins
+ocr_app/android/.gradle/
+ocr_app/android/local.properties
+ocr_app/.idea/
+
+# Secrets
+**/service_credentials.json
