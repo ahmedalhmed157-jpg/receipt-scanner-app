@@ -4,17 +4,18 @@ import json
 import os
 import re
 from typing import Optional
-from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from google import genai
 from google.genai import errors, types
-from PIL import Image, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 from starlette.concurrency import run_in_threadpool
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_SIDE = 2048  # الخط اليدوي يحتاج دقة أعلى من 1568
 APP_TOKEN = os.environ.get("APP_TOKEN")
+# ENHANCE_IMAGE=0 يطفّي فلاتر التباين والحدة (للمقارنة بين النتيجتين)
+ENHANCE_IMAGE = os.environ.get("ENHANCE_IMAGE", "1") == "1"
 
 # السيرفر يتعرض للإنترنت: بدون توكن أي شخص يستهلك حصة Gemini حقتك
 if not APP_TOKEN:
@@ -51,21 +52,19 @@ Rules:
 
 
 def prepare_image(raw: bytes) -> bytes:
-    """تصحيح الاتجاه + تصغير + إرجاع الفلاتر لتحسين وضوح النص."""
+    """تصحيح الاتجاه + تصغير + (اختياري) فلاتر لتحسين وضوح النص."""
     try:
         img = Image.open(io.BytesIO(raw))
         img = ImageOps.exif_transpose(img).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image file")
-    
-    # تصغير الصورة
+
     img.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
     
-    # 🌟 إرجاع الفلاتر
-    enhancer = ImageEnhance.Contrast(img)
-    img = enhancer.enhance(1.5) 
-    img = img.filter(ImageFilter.SHARPEN) 
-    
+    if ENHANCE_IMAGE:
+        img = ImageEnhance.Contrast(img).enhance(1.5)
+        img = img.filter(ImageFilter.SHARPEN)
+
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=92)
     return buf.getvalue()

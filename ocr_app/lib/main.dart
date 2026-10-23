@@ -53,16 +53,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _pickAndOpenDocument() async {
     try {
-      // 1. فتح مدير الملفات
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
+      // 1. فتح مدير الملفات (file_picker 12+ : pickFile يرجّع PlatformFile أو null)
+      final picked = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx'],
       );
 
-      if (result != null && result.files.single.path != null) {
-        File file = File(result.files.single.path!);
-        String fileName = result.files.single.name;
-        String? extension = result.files.single.extension?.toLowerCase();
+      if (picked != null && picked.path != null) {
+        final file = File(picked.path!);
+        final fileName = picked.name;
+        final extension = picked.extension?.toLowerCase();
 
         // 2. التحقق من نوع الملف
         if (extension == 'pdf') {
