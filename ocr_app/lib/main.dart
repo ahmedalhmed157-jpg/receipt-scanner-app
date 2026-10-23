@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:image_picker/image_picker.dart';
 import 'receipt_review_screen.dart'; // استدعاء شاشة المراجعة
+import 'settings_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -19,6 +21,10 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'Receipt Scanner',
       theme: ThemeData(primarySwatch: Colors.teal),
+      builder: (context, child) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: child!,
+      ),
       home: const HomeScreen(),
     );
   }
@@ -34,15 +40,61 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   File? _selectedImage;
   bool _isLoading = false;
+  AppSettings? _settings;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final loaded = await AppSettings.load();
+    if (!mounted) return;
+    setState(() => _settings = loaded);
+    // أول مرة: افتح الإعدادات تلقائياً
+    if (!loaded.isConfigured) {
+      await _openSettings();
+    }
+  }
+
+  Future<void> _openSettings() async {
+    final updated = await Navigator.push<AppSettings>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(
+          initial: _settings ?? const AppSettings(apiBase: '', token: ''),
+        ),
+      ),
+    );
+    if (updated != null && mounted) {
+      setState(() => _settings = updated);
+    }
+  }
 
   // 1. دالة المسح الضوئي (الكاميرا)
   Future<void> _scanWithScanner() async {
     try {
       final pics = await CunningDocumentScanner.getPictures(noOfPages: 1);
       if (pics == null || pics.isEmpty) return;
-      _processImage(File(pics.first));
+      await _processImage(File(pics.first));
     } catch (e) {
-      _showError('حدث خطأ في الماسح: $e');
+      debugPrint('scanner failed: $e');
+      _showError('الماسح الذكي ما يشتغل على جهازك، فتحت الكاميرا العادية بدله');
+      await _takePhoto();
+    }
+  }
+
+  // كاميرا عادية (بديل إذا الماسح الذكي ما اشتغل)
+  Future<void> _takePhoto() async {
+    try {
+      final picker = ImagePicker();
+      final image = await picker.pickImage(source: ImageSource.camera, imageQuality: 90);
+      if (image == null) return;
+      await _processImage(File(image.path));
+    } catch (e) {
+      debugPrint('camera failed: $e');
+      _showError('تعذر فتح الكاميرا');
     }
   }
 
@@ -51,28 +103,33 @@ class _HomeScreenState extends State<HomeScreen> {
     final picker = ImagePicker();
     final image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
     if (image == null) return;
-    _processImage(File(image.path));
+    await _processImage(File(image.path));
   }
 
   // 3. الدالة المسؤولة عن إرسال الصورة للسيرفر
   Future<void> _processImage(File file) async {
+    final settings = _settings ?? await AppSettings.load();
+    if (!settings.isConfigured) {
+      _showError('حدد عنوان السيرفر والتوكن من الإعدادات أولاً');
+      await _openSettings();
+      return;
+    }
+
     setState(() {
       _selectedImage = file;
       _isLoading = true;
     });
 
     try {
-      // ⚠️ ضع عنوان IP الخاص بجهاز الكمبيوتر هنا
-      final uri = Uri.parse('http://192.168.0.109:8000/ocr');       
-      var request = http.MultipartRequest('POST', uri);
-      
-      // ⚠️ ضع نفس التوكن الذي شغلت به السيرفر
-      request.headers['x-app-token'] = 'my_secret_token_123'; 
-      
+      final uri = Uri.parse('${settings.apiBase}/ocr');
+      final request = http.MultipartRequest('POST', uri);
+      request.headers['x-app-token'] = settings.token;
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
 
-      var streamedResponse = await request.send().timeout(const Duration(seconds: 60));
-      var response = await http.Response.fromStream(streamedResponse);
+      // 90 ثانية: السيرفر المجاني ينام ويحتاج وقت يصحى عند أول طلب
+      final streamedResponse =
+          await request.send().timeout(const Duration(seconds: 90));
+      final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
@@ -94,8 +151,16 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }
       } else {
-        _showError('خطأ من السيرفر (${response.statusCode})');
+        String detail = '';
+        try {
+          detail = jsonDecode(utf8.decode(response.bodyBytes))['detail']?.toString() ?? '';
+        } catch (_) {}
+        _showError('خطأ من السيرفر (${response.statusCode}) $detail');
       }
+    } on TimeoutException {
+      _showError('انتهت مهلة الاتصال، السيرفر مشغول أو لسه يصحى. جرب مرة ثانية.');
+    } on SocketException {
+      _showError('ماكو اتصال بالإنترنت أو عنوان السيرفر غلط.');
     } catch (e) {
       _showError('حدث خطأ أثناء الاتصال: $e');
     }
@@ -117,6 +182,11 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.teal,
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.settings, color: Colors.white),
+            tooltip: 'الإعدادات',
+            onPressed: _openSettings,
+          ),
           if (_selectedImage != null)
             IconButton(
               icon: const Icon(Icons.delete, color: Colors.white),
@@ -156,6 +226,20 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               
+              const SizedBox(height: 10),
+
+              // زر الكاميرا العادية
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _takePhoto,
+                icon: const Icon(Icons.camera_alt, color: Colors.white),
+                label: const Text('تصوير بالكاميرا', style: TextStyle(fontSize: 16, color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal.shade700,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+
               const SizedBox(height: 10),
 
               // زر المعرض
