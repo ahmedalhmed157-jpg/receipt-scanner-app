@@ -1,17 +1,3 @@
-"""
-Receipt OCR backend (Gemini version). Same response format as the Claude version,
-so the Flutter app and the review screen work unchanged.
-
-Run locally:
-    export GEMINI_API_KEY=your-key-from-google-ai-studio
-    export APP_TOKEN=any-long-random-string      # optional but recommended
-    uvicorn main:app --host 0.0.0.0 --port 8000
-
-Windows PowerShell:
-    $env:GEMINI_API_KEY="your-key"
-    $env:APP_TOKEN="any-long-random-string"
-"""
-
 import io
 import json
 import os
@@ -20,16 +6,14 @@ import re
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from google import genai
 from google.genai import errors, types
-from PIL import Image, ImageOps
 from PIL import Image, ImageOps, ImageEnhance, ImageFilter
-# Model names and free-tier limits change often. Check Google AI Studio for the
-# current list, and override with the GEMINI_MODEL environment variable if needed.
+
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
-MAX_SIDE = 1568                      # longest side sent to the model
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+MAX_SIDE = 1568
 APP_TOKEN = os.environ.get("APP_TOKEN")
 
-client = genai.Client()  # reads GEMINI_API_KEY from the environment
+client = genai.Client()
 app = FastAPI(title="Receipt OCR (Gemini)")
 
 PROMPT = """You are reading a photo of a receipt that contains handwritten text
@@ -51,31 +35,22 @@ Rules:
 - "full_text": all readable text, line by line, in the original language and order.
 - "date": as written; use YYYY-MM-DD only if the format is unambiguous.
 - "total", "quantity", "price": numbers only, using Western digits (0-9) and a dot
-  as the decimal separator, even if the original uses Arabic-Indic digits.
+  as the decimal separator.
 - "uncertain": list the fields you are not sure about, using the names
   "vendor", "date", "currency", "total", or "items.N" (N = zero-based item index).
 - If the image is not a receipt or has no readable text, return empty fields
   and put a short explanation in "full_text"."""
 
-
 def prepare_image(raw: bytes) -> bytes:
-    """Fix rotation, shrink, enhance contrast, and sharpen for better OCR."""
     try:
         img = Image.open(io.BytesIO(raw))
         img = ImageOps.exif_transpose(img).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image file")
-
-    # 1. تصغير الصورة (لتسريع الإرسال)
     img.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
-    
-    # 2. تحسين التباين (يجعل النص بارزاً)
     enhancer = ImageEnhance.Contrast(img)
-    img = enhancer.enhance(1.5) # زيادة التباين بنسبة 50%
-    
-    # 3. زيادة الحدة (يساعد في قراءة الخطوط الرفيعة والخط اليدوي)
+    img = enhancer.enhance(1.5)
     img = img.filter(ImageFilter.SHARPEN)
-
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=90)
     return buf.getvalue()
@@ -86,17 +61,12 @@ def extract_json(text: str) -> dict:
         raise ValueError("no JSON object found")
     return json.loads(match.group(0))
 
-
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
-
 @app.post("/ocr")
-async def ocr(
-    file: UploadFile = File(...),
-    x_app_token: str | None = Header(default=None),
-):
+async def ocr(file: UploadFile = File(...), x_app_token: str | None = Header(default=None)):
     if APP_TOKEN and x_app_token != APP_TOKEN:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -121,7 +91,6 @@ async def ocr(
             ),
         )
     except errors.APIError as e:
-        # 429 usually means the free-tier rate limit was hit
         status = 429 if getattr(e, "code", None) == 429 else 502
         raise HTTPException(status_code=status, detail=f"Model API error ({getattr(e, 'code', '?')})")
     except Exception:
@@ -133,7 +102,6 @@ async def ocr(
     except (ValueError, json.JSONDecodeError):
         raise HTTPException(status_code=502, detail="Could not parse model output")
 
-    # Make sure every key exists so the app never has to null-check the structure.
     return {
         "vendor": data.get("vendor") or "",
         "date": data.get("date") or "",
