@@ -7,7 +7,9 @@ import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:image_picker/image_picker.dart';
 import 'receipt_review_screen.dart'; // استدعاء شاشة المراجعة
 import 'settings_screen.dart';
-
+import 'package:file_picker/file_picker.dart';
+import 'package:open_filex/open_filex.dart';
+import 'pdf_viewer_screen.dart';
 void main() {
   runApp(const MyApp());
 }
@@ -42,10 +44,47 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = false;
   AppSettings? _settings;
 
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
+  }
+
+  Future<void> _pickAndOpenDocument() async {
+    try {
+      // 1. فتح مدير الملفات
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx', 'ppt', 'pptx'],
+      );
+
+      if (result != null && result.files.single.path != null) {
+        File file = File(result.files.single.path!);
+        String fileName = result.files.single.name;
+        String? extension = result.files.single.extension?.toLowerCase();
+
+        // 2. التحقق من نوع الملف
+        if (extension == 'pdf') {
+          // إذا كان PDF، افتحه داخل التطبيق
+          if (!mounted) return;
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PdfViewerScreen(file: file, fileName: fileName),
+            ),
+          );
+        } else {
+          // إذا كان Word أو PPT، افتحه بتطبيق الهاتف الافتراضي
+          final openResult = await OpenFilex.open(file.path);
+          if (openResult.type != ResultType.done) {
+            _showError('لا يوجد تطبيق مثبت على هاتفك لفتح هذا النوع من الملفات.');
+          }
+        }
+      }
+    } catch (e) {
+      _showError('تعذر فتح الملف: $e');
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -253,7 +292,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
-              
+                            const SizedBox(height: 10),
+              // زر قارئ الملفات
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : _pickAndOpenDocument,
+                icon: const Icon(Icons.menu_book, color: Colors.white),
+                label: const Text('قارئ الملفات (PDF, Word, PPT)', style: TextStyle(fontSize: 16, color: Colors.white)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.deepPurple, // لون مميز للقارئ
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
               if (_isLoading)
                 const Padding(
                   padding: EdgeInsets.all(30.0),
