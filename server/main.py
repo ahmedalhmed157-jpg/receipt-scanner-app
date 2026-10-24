@@ -4,24 +4,21 @@ import json
 import os
 import re
 from typing import Optional
+
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from google import genai
 from google.genai import errors, types
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageOps, ImageEnhance, ImageFilter
 from starlette.concurrency import run_in_threadpool
 
 MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-MAX_SIDE = 2048  # الخط اليدوي يحتاج دقة أعلى من 1568
+MAX_SIDE = 2048
 APP_TOKEN = os.environ.get("APP_TOKEN")
-# ENHANCE_IMAGE=0 يطفّي فلاتر التباين والحدة (للمقارنة بين النتيجتين)
-ENHANCE_IMAGE = os.environ.get("ENHANCE_IMAGE", "1") == "1"
 
-# السيرفر يتعرض للإنترنت: بدون توكن أي شخص يستهلك حصة Gemini حقتك
 if not APP_TOKEN:
     raise RuntimeError("APP_TOKEN environment variable is required")
 
-# يقرأ GEMINI_API_KEY (أو GOOGLE_API_KEY) من متغيرات البيئة
 client = genai.Client()
 app = FastAPI(title="Receipt OCR (Gemini)")
 
@@ -52,19 +49,20 @@ Rules:
 
 
 def prepare_image(raw: bytes) -> bytes:
-    """تصحيح الاتجاه + تصغير + (اختياري) فلاتر لتحسين وضوح النص."""
+    """تصحيح الاتجاه + تصغير + إرجاع الفلاتر لتحسين وضوح النص."""
     try:
         img = Image.open(io.BytesIO(raw))
         img = ImageOps.exif_transpose(img).convert("RGB")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid image file")
-
+    
     img.thumbnail((MAX_SIDE, MAX_SIDE), Image.LANCZOS)
     
-    if ENHANCE_IMAGE:
-        img = ImageEnhance.Contrast(img).enhance(1.5)
-        img = img.filter(ImageFilter.SHARPEN)
-
+    # 🌟 الفلاتر لتحسين النص
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(1.5) 
+    img = img.filter(ImageFilter.SHARPEN) 
+    
     buf = io.BytesIO()
     img.save(buf, "JPEG", quality=92)
     return buf.getvalue()
@@ -85,7 +83,6 @@ def as_str(value) -> str:
 
 
 def normalize_items(items) -> list:
-    """يضمن أن كل صنف dict بثلاث حقول نصية، حتى لا ينهار التطبيق."""
     result = []
     if not isinstance(items, list):
         return result
@@ -110,7 +107,6 @@ async def health():
 
 @app.get("/check")
 async def check(x_app_token: Optional[str] = Header(default=None)):
-    """يستخدمه التطبيق لاختبار العنوان والتوكن من شاشة الإعدادات."""
     if not x_app_token or not hmac.compare_digest(x_app_token, APP_TOKEN):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return {"status": "ok"}
@@ -130,7 +126,6 @@ async def ocr(
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Image too large (max 10 MB)")
 
-    # معالجة الصورة شغل ثقيل على الـ CPU، نطلعه من الـ event loop
     image_bytes = await run_in_threadpool(prepare_image, raw)
 
     try:

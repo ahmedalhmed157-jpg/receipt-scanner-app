@@ -11,12 +11,8 @@ class PdfViewerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(fileName, style: const TextStyle(color: Colors.white, fontSize: 16)),
-        backgroundColor: Colors.teal,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
-      body: SfPdfViewer.file(file), // ويدجت العرض الجاهزة
+      appBar: AppBar(title: Text(fileName, style: const TextStyle(color: Colors.white)), backgroundColor: Colors.teal),
+      body: SfPdfViewer.file(file),
     );
   }
 }

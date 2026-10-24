@@ -1,14 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-<uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    
+    <!-- أضف هذا القسم لفتح الملفات -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="*/*" />
         </intent>
     </queries>
-        <application
+
+    <application
         android:usesCleartextTraffic="true" 
-        android:label="الشكاكي"
+        android:label="ماسح الإيصالات"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
